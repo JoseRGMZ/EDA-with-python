@@ -1,0 +1,30 @@
+import snowflake.snowpark as snowpark
+from snowflake.snowpark.functions import *
+
+def main(session: snowpark.Session): 
+    # Your code goes here, inside the "main" handler.
+    table_name =                                                         -- type table name
+    dataframe = session.table(table_name)
+
+    # Access column headers
+    headers = dataframe.columns
+
+    # Sort column headers by name
+    sorted_headers = sorted(headers)
+
+    # Header to look up
+    lookup_header =                                                     -- look up for any field
+
+    # Check if the lookup header is present
+    if lookup_header in sorted_headers:
+        print(f"The header '{lookup_header}' is present.")
+    else:
+        print(f"The header '{lookup_header}' is not present.")
+
+    # Print sorted column headers in a 4x4 grid with spaces
+    for i in range(0, len(sorted_headers), 4):
+        row_headers = sorted_headers[i:i+4]
+        print(" , ".join(row_headers))
+
+    # Return the string "success" instead of the dataframe
+    return "success"
