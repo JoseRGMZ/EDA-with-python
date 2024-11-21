@@ -1,0 +1,183 @@
+## Archivo Offenders List
+import pandas as pd
+import os
+import numpy as np
+import re
+from collections import Counter
+from datetime import datetime
+import locale
+
+# Configurar locale a español (esto varía según el sistema operativo)
+try:
+    locale.setlocale(locale.LC_TIME, 'es_ES.UTF-8')  # Para sistemas Unix/Linux
+except locale.Error:
+    try:
+        locale.setlocale(locale.LC_TIME, 'Spanish_Spain.1252')  # Para Windows
+    except locale.Error:
+        print("No se pudo establecer la configuración regional a español. Verifica tu sistema.")
+
+# Paso 1: Cargar datos desde un archivo CSV
+def load_data(file_path):
+    if os.path.exists(file_path):
+        try:
+            df = pd.read_csv(file_path, encoding='latin1')
+            print("Archivo ML List cargado correctamente.")
+            return df
+        except UnicodeDecodeError as e:
+            print(f"Error al leer el archivo: {e}")
+            return None
+    else:
+        print(f"El archivo no se encuentra en la ruta: {file_path}")
+        return None
+
+# Paso 2: Reemplazar abreviaturas de meses por nombres completos y convertir a formato de fecha
+def reemplazar_abreviaturas_mes(df, columna):
+    meses_mapeo = {
+        'ene': 'enero',
+        'feb': 'febrero',
+        'mar': 'marzo',
+        'abr': 'abril',
+        'may': 'mayo',
+        'jun': 'junio',
+        'jul': 'julio',
+        'ago': 'agosto',
+        'sep': 'septiembre',
+        'oct': 'octubre',
+        'nov': 'noviembre',
+        'dic': 'diciembre'
+    }
+    
+    def reemplazar_mes(fecha):
+        if pd.isna(fecha):
+            return fecha
+        for abreviatura, completo in meses_mapeo.items():
+            if abreviatura in fecha.lower():
+                return fecha.lower().replace(abreviatura, completo)
+        return fecha
+
+    if columna in df.columns:
+        df[columna] = df[columna].apply(reemplazar_mes)
+
+        try:
+            df[columna] = pd.to_datetime(df[columna], format='%d-%B-%y', errors='coerce').dt.strftime('%d/%m/%Y')
+            print(f"\nColumna '{columna}' convertida al formato DD/MM/YYYY con meses completos.")
+        except Exception as e:
+            print(f"\nError al convertir la columna '{columna}': {e}")
+    else:
+        print(f"\nLa columna '{columna}' no se encontró en el DataFrame.")
+    return df
+
+# Paso 3: Añadir columna de OFFENDER_ID única basada en la fecha actual
+def add_offender_id(df):
+    fecha_actual = datetime.now().strftime('%Y%m%d')
+    df['OFFENDER_ID'] = 'OFID' + fecha_actual + (df.index + 1).astype(str)
+    print("\nColumna 'OFFENDER_ID' añadida con éxito basada en la fecha de generación.")
+    return df
+
+# Paso 4: Realizar el análisis exploratorio de los datos (EDA)
+def EDA(df):
+    df = reemplazar_abreviaturas_mes(df, 'DAY')
+
+    numeric_columns = ['AGING', "SI's", 'DETONATED']
+    for column in numeric_columns:
+        if column in df.columns:
+            try:
+                df[column] = pd.to_numeric(df[column].astype(str).str.replace(r'[^0-9.,-]', '', regex=True).str.replace(',', '.'), errors='coerce')
+                print(f"\nColumna '{column}' convertida a formato numérico estándar.")
+                print(f"\nPrimeras 5 filas con la columna '{column}' convertida:")
+                print(df[[column]].head())
+            except Exception as e:
+                print(f"\nError al convertir la columna '{column}': {e}")
+        else:
+            print(f"\nLa columna '{column}' no se encontró en el DataFrame.")
+    
+    escanear_estructuras(df)
+
+    print("\nPrimeras 5 filas del dataset:")
+    print(df.head())
+
+    print("\nEstadísticas descriptivas:")
+    print(df.describe(include='all'))
+
+    print("\nInformación del DataFrame:")
+    print(df.info())
+
+    print("\nValores nulos en cada columna:")
+    print(df.isnull().sum())
+
+    print("\nNúmero de filas duplicadas antes de eliminar:")
+    print(df.duplicated().sum())
+    df.drop_duplicates(inplace=True)
+    print("\nNúmero de filas duplicadas después de eliminar:")
+    print(df.duplicated().sum())
+
+    return df
+
+# Paso 5: Escanear y valorar las estructuras de cada columna
+def escanear_estructuras(df):
+    columnas_excepcion = ['OFFENDER PROCESS', 'TIPO']
+
+    def identificar_estructura(valor):
+        if pd.isna(valor):
+            return 'NaN'
+        if re.match(r'^[a-záéíóúñ]+(\s[a-záéíóúñ]+)*$', str(valor).lower()):
+            return 'Nombre completo'
+        if re.match(r'^\d+$', str(valor)):
+            return 'Número'
+        if re.match(r'^MZ-\d{1,2}-\d{3}-\d{2}-\d{2}$', str(valor)):
+            return 'Formato ORIGEN'
+        return 'Otro'
+
+    resultados_estructuras = {}
+
+    for columna in df.columns:
+        if columna in columnas_excepcion:
+            print(f"\nLa columna '{columna}' se ha excluido de la revisión de nombres completos.")
+            continue
+
+        estructuras = df[columna].apply(identificar_estructura)
+        conteo_estructuras = Counter(estructuras)
+        
+        if 'Nombre completo' in estructuras.values:
+            df.loc[estructuras == 'Nombre completo', columna] = df.loc[estructuras == 'Nombre completo', columna].apply(
+                lambda x: ' '.join([x.split()[0].title()] + [part.title() for part in x.split()[1:]]) if pd.notna(x) else x
+            )
+
+        resultados_estructuras[columna] = conteo_estructuras
+
+        print(f"\nEstructuras encontradas en la columna '{columna}':")
+        for estructura, conteo in conteo_estructuras.items():
+            porcentaje = (conteo / len(df)) * 100
+            print(f" - {estructura}: {conteo} registros ({porcentaje:.2f}%)")
+        
+        estructura_comun = conteo_estructuras.most_common(1)[0][0]
+        print(f"Estructura predominante en '{columna}': {estructura_comun}")
+
+        if estructura_comun == 'Otro':
+            ejemplo_otro = df[df[columna].apply(identificar_estructura) == 'Otro'][columna].sample(1).values[0]
+            print(f"Ejemplo de un valor con la estructura 'Otro' en '{columna}': {ejemplo_otro}")
+        
+    return resultados_estructuras
+
+# Paso 6: Guardar DataFrame actualizado
+def save_updated_data(df, file_path):
+    new_file_path = file_path.replace('.csv', '_Transformed.csv')
+    try:
+        df.to_csv(new_file_path, index=False, encoding='latin1')
+        print(f"\nEl DataFrame actualizado se ha guardado correctamente en: {new_file_path}")
+    except Exception as e:
+        print(f"\nError al guardar el archivo: {e}")
+
+# Main para ejecutar el análisis
+def main():
+    file_path = r'C:\Users\463847\Downloads\1.csv' ## agregar path en formato crudo dependiendo directorio local del input
+
+    df = load_data(file_path)
+    
+    if df is not None:
+        df = EDA(df)
+        df = add_offender_id(df)
+        save_updated_data(df, file_path)
+
+if __name__ == "__main__":
+    main()
